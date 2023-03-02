@@ -50,7 +50,9 @@ public class UpdateHandler extends BaseHandlerStd {
                 .then(progress -> updateCluster(proxy, proxyClient, progress, request, ClusterUpdateFieldType.SHARD_CONFIGURATION, logger))
                 .then(progress -> updateCluster(proxy, proxyClient, progress, request, ClusterUpdateFieldType.ACL_NAME, logger))
                 .then(progress -> describeClusters(proxy, progress, proxyClient))
-                .then(progress -> tagResource(proxy, proxyClient, progress, request, logger))
+                .then(progress -> addTags(proxy, progress, request, proxyClient))
+                .then(progress -> removeTags(proxy, progress, request, proxyClient))
+                .then(progress -> listTags(proxy, progress, proxyClient))
                 .then(progress -> ProgressEvent.defaultSuccessHandler(progress.getResourceModel()));
     }
 
@@ -168,54 +170,60 @@ public class UpdateHandler extends BaseHandlerStd {
                 .progress();
     }
 
-    protected ProgressEvent<ResourceModel, CallbackContext> tagResource(final AmazonWebServicesClientProxy proxy,
-                                                                        final ProxyClient<MemoryDbClient> proxyClient,
-                                                                        final ProgressEvent<ResourceModel, CallbackContext> progress,
-                                                                        final ResourceHandlerRequest<ResourceModel> request,
-                                                                        final Logger logger) {
-        if (!isUpdateNeeded(request.getDesiredResourceTags(), request.getPreviousResourceTags()) || !isArnPresent(progress.getResourceModel())) {
-            logger.log("No tags to update.");
-            return listTags(proxy, progress, proxyClient);
+    public ProgressEvent<ResourceModel, CallbackContext> addTags(
+        AmazonWebServicesClientProxy proxy,
+        ProgressEvent<ResourceModel, CallbackContext> progress,
+        ResourceHandlerRequest<ResourceModel> request,
+        ProxyClient<MemoryDbClient> proxyClient
+    ) {
+        final Map<String, String> tagsToAdd = TagHelper
+            .generateTagsToAdd(progress.getResourceModel(), request);
+        if (!tagsToAdd.isEmpty()) {
+            // If ARN is null, then do a describeCall and set ARN in model. This is needed since we have a contract test
+            // with null ARN.
+            TagHelper.setModelArn(proxy, proxyClient, progress.getResourceModel());
+            return proxy
+                .initiate("AWS-MemoryDB-Cluster::AddTags", proxyClient, progress.getResourceModel(),
+                    progress.getCallbackContext())
+                .translateToServiceRequest((model) -> Translator
+                    .translateToTagResourceRequest(progress.getResourceModel().getARN(),
+                        TagHelper.convertToList(tagsToAdd)))
+                .makeServiceCall((awsRequest, client) -> handleExceptions(() ->
+                    client.injectCredentialsAndInvokeV2(awsRequest,
+                        client.client()::tagResource)))
+                .stabilize(
+                    (addTagsRequest, addTagsResponse, proxyInvocation, model, context) -> isStabilized(
+                        proxy, proxyInvocation, model))
+                .progress();
         }
-
-        return progress.then(o -> handleExceptions(() -> {
-                            tagResource(proxy, proxyClient,  progress.getResourceModel(), progress.getCallbackContext(), request.getDesiredResourceTags());
-                            return ProgressEvent.progress(o.getResourceModel(), o.getCallbackContext()); })
-                );
+        return progress;
     }
 
-    private ProgressEvent<ResourceModel, CallbackContext> tagResource(final AmazonWebServicesClientProxy proxy,
-                                                                      final ProxyClient<MemoryDbClient> proxyClient,
-                                                                      final ResourceModel model,
-                                                                      final CallbackContext callbackContext,
-                                                                      final Map<String, String> tags) {
-        final String arn = model.getARN();
-        final Set<Tag> currentTags = mapToTags(tags);
-        final Set<Tag> existingTags = listTags(proxy, proxyClient, model, callbackContext);
-        final Set<Tag> tagsToRemove = Sets.difference(existingTags, currentTags);
-        final Set<Tag> tagsToAdd = Sets.difference(currentTags, existingTags);
-
-        if (CollectionUtils.isNotEmpty(tagsToRemove)) {
-            UntagResourceResponse untagResourceResponse = proxy.injectCredentialsAndInvokeV2(Translator.translateToUntagResourceRequest(arn, tagsToRemove), proxyClient.client()::untagResource);
-            model.setTags(translateTagsFromSdk(untagResourceResponse.tagList()));
+    public ProgressEvent<ResourceModel, CallbackContext> removeTags(
+        AmazonWebServicesClientProxy proxy,
+        ProgressEvent<ResourceModel, CallbackContext> progress,
+        ResourceHandlerRequest<ResourceModel> request,
+        ProxyClient<MemoryDbClient> proxyClient
+    ) {
+        final Set<String> tagsToRemove = TagHelper
+            .generateTagsToRemove(progress.getResourceModel(), request);
+        if (!tagsToRemove.isEmpty()) {
+            // If ARN is null, then do a describeCall and set ARN in model. This is needed since we have a contract test
+            // with null ARN.
+            TagHelper.setModelArn(proxy, proxyClient, progress.getResourceModel());
+            return proxy
+                .initiate("AWS-MemoryDB-User::RemoveTags", proxyClient, progress.getResourceModel(),
+                    progress.getCallbackContext())
+                .translateToServiceRequest((model) -> Translator
+                    .translateToUntagResourceRequest(progress.getResourceModel().getARN(), tagsToRemove))
+                .makeServiceCall((awsRequest, client) -> handleExceptions(() ->
+                    client.injectCredentialsAndInvokeV2(awsRequest,
+                        client.client()::untagResource)))
+                .stabilize(
+                    (addTagsRequest, addTagsResponse, proxyInvocation, model, context) -> isStabilized(
+                        proxy, proxyInvocation, model))
+                .progress();
         }
-
-        if (CollectionUtils.isNotEmpty(tagsToAdd)) {
-            TagResourceResponse tagResourceResponse = proxy.injectCredentialsAndInvokeV2(Translator.translateToTagResourceRequest(arn, tagsToAdd), proxyClient.client()::tagResource);
-            model.setTags(translateTagsFromSdk(tagResourceResponse.tagList()));
-        }
-
-        return ProgressEvent.progress(model, callbackContext);
-    }
-
-    private Set<Tag> listTags(final AmazonWebServicesClientProxy proxy,
-                              final ProxyClient<MemoryDbClient> proxyClient,
-                              final ResourceModel model,
-                              final CallbackContext callbackContext) {
-        return Optional.ofNullable(ProgressEvent.progress(model, callbackContext)
-                .then(progress -> listTags(proxy, progress, proxyClient))
-                .getResourceModel()
-                .getTags())
-                .orElse(Collections.emptySet());
+        return progress;
     }
 }

@@ -1,15 +1,8 @@
 package software.amazon.memorydb.user;
 
-import com.amazonaws.util.CollectionUtils;
-import com.amazonaws.util.StringUtils;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 import software.amazon.awssdk.services.memorydb.MemoryDbClient;
-import software.amazon.awssdk.services.memorydb.model.DescribeUsersResponse;
 import software.amazon.cloudformation.proxy.AmazonWebServicesClientProxy;
 import software.amazon.cloudformation.proxy.Logger;
 import software.amazon.cloudformation.proxy.ProgressEvent;
@@ -17,6 +10,7 @@ import software.amazon.cloudformation.proxy.ProxyClient;
 import software.amazon.cloudformation.proxy.ResourceHandlerRequest;
 
 public class UpdateHandler extends BaseHandlerStd {
+
     private Logger logger;
 
     @Override
@@ -31,8 +25,10 @@ public class UpdateHandler extends BaseHandlerStd {
 
         return ProgressEvent.progress(request.getDesiredResourceState(), callbackContext)
             .then(progress -> updateUser(proxy, progress, request, proxyClient))
-            .then(progress -> updateTags(proxy, progress, request, proxyClient))
-            .then(progress -> new ReadHandler().handleRequest(proxy, request, callbackContext, proxyClient, logger));
+            .then(progress -> addTags(proxy, progress, request, proxyClient))
+            .then(progress -> removeTags(proxy, progress, request, proxyClient))
+            .then(progress -> new ReadHandler()
+                .handleRequest(proxy, request, callbackContext, proxyClient, logger));
     }
 
     private ProgressEvent<ResourceModel, CallbackContext> updateUser(
@@ -41,9 +37,11 @@ public class UpdateHandler extends BaseHandlerStd {
         ResourceHandlerRequest<ResourceModel> request,
         ProxyClient<MemoryDbClient> proxyClient
     ) {
-        if (hasChangeOnCoreModel(request.getDesiredResourceState(), request.getPreviousResourceState())) {
-            return proxy.initiate("AWS-MemoryDB-User::Update", proxyClient, progress.getResourceModel(),
-                progress.getCallbackContext())
+        if (Translator.hasChangeOnCoreModelWithoutTags(request.getDesiredResourceState(),
+            request.getPreviousResourceState())) {
+            return proxy
+                .initiate("AWS-MemoryDB-User::Update", proxyClient, progress.getResourceModel(),
+                    progress.getCallbackContext())
                 .translateToServiceRequest(Translator::translateToUpdateRequest)
                 .makeServiceCall((awsRequest, client) -> handleExceptions(() ->
                     client.injectCredentialsAndInvokeV2(awsRequest, client.client()::updateUser)))
@@ -57,84 +55,60 @@ public class UpdateHandler extends BaseHandlerStd {
 
     }
 
-    private ProgressEvent<ResourceModel, CallbackContext> updateTags(
+    private ProgressEvent<ResourceModel, CallbackContext> addTags(
         AmazonWebServicesClientProxy proxy,
         ProgressEvent<ResourceModel, CallbackContext> progress,
         ResourceHandlerRequest<ResourceModel> request,
         ProxyClient<MemoryDbClient> proxyClient
     ) {
-        if (!request.getPreviousResourceTags().equals(request.getDesiredResourceTags())) {
-            return progress
-                .then(o ->
-                    handleExceptions(() -> {
-                        handleTagging(proxy, proxyClient,  request.getDesiredResourceTags(), progress.getResourceModel());
-                        return ProgressEvent.progress(o.getResourceModel(), o.getCallbackContext());
-                    })
-                );
-        } else {
-            return progress;
+        final Map<String, String> tagsToAdd = TagHelper
+            .generateTagsToAdd(progress.getResourceModel(), request);
+        if (!tagsToAdd.isEmpty()) {
+            // If ARN is null, then do a describeCall and set ARN in model. This is needed since we have a contract test
+            // with null ARN.
+            TagHelper.setModelArn(proxy, proxyClient, progress.getResourceModel());
+            return proxy
+                .initiate("AWS-MemoryDB-User::AddTags", proxyClient, progress.getResourceModel(),
+                    progress.getCallbackContext())
+                .translateToServiceRequest((model) -> Translator
+                    .translateToTagResourceRequest(progress.getResourceModel(),
+                        TagHelper.convertToList(tagsToAdd)))
+                .makeServiceCall((awsRequest, client) -> handleExceptions(() ->
+                    client.injectCredentialsAndInvokeV2(awsRequest,
+                        client.client()::tagResource)))
+                .stabilize(
+                    (addTagsRequest, addTagsResponse, proxyInvocation, model, context) -> isUserStabilized(
+                        proxyInvocation, model, logger))
+                .progress();
         }
+        return progress;
     }
 
-    private void handleTagging(AmazonWebServicesClientProxy proxy, ProxyClient<MemoryDbClient> client,
-        final Map<String, String> tags, final ResourceModel model) {
-
-        final Set<Tag> newTags = tags == null ? Collections.emptySet() : new HashSet<>(Translator.translateTags(tags));
-        final Set<Tag> existingTags = new HashSet<>();
-
-        //Fix for unpopulated arn on resource model
-        setModelArn(proxy, client, model);
-        if (!StringUtils.isNullOrEmpty(model.getArn())) {
-            existingTags.addAll(
-                Translator.translateTags(
-                    proxy.injectCredentialsAndInvokeV2(
-                        Translator.translateToListTagsRequest(model),
-                        client.client()::listTags).tagList()));
+    private ProgressEvent<ResourceModel, CallbackContext> removeTags(
+        AmazonWebServicesClientProxy proxy,
+        ProgressEvent<ResourceModel, CallbackContext> progress,
+        ResourceHandlerRequest<ResourceModel> request,
+        ProxyClient<MemoryDbClient> proxyClient
+    ) {
+        final Set<String> tagsToRemove = TagHelper
+            .generateTagsToRemove(progress.getResourceModel(), request);
+        if (!tagsToRemove.isEmpty()) {
+            // If ARN is null, then do a describeCall and set ARN in model. This is needed since we have a contract test
+            // with null ARN.
+            TagHelper.setModelArn(proxy, proxyClient, progress.getResourceModel());
+            return proxy
+                .initiate("AWS-MemoryDB-User::RemoveTags", proxyClient, progress.getResourceModel(),
+                    progress.getCallbackContext())
+                .translateToServiceRequest((model) -> Translator
+                    .translateToUntagResourceRequest(progress.getResourceModel(), tagsToRemove))
+                .makeServiceCall((awsRequest, client) -> handleExceptions(() ->
+                    client.injectCredentialsAndInvokeV2(awsRequest,
+                        client.client()::untagResource)))
+                .stabilize(
+                    (addTagsRequest, addTagsResponse, proxyInvocation, model, context) -> isUserStabilized(
+                        proxyInvocation, model, logger))
+                .progress();
         }
-
-        final List<Tag> tagsToRemove = existingTags.stream()
-            .filter(tag -> !newTags.contains(tag))
-            .collect(Collectors.toList());
-        final List<Tag> tagsToAdd = newTags.stream()
-            .filter(tag -> !existingTags.contains(tag))
-            .collect(Collectors.toList());
-
-        if (!CollectionUtils.isNullOrEmpty(tagsToRemove)) {
-            proxy.injectCredentialsAndInvokeV2(
-                Translator.translateToUntagResourceRequest(model.getArn(), tagsToRemove),
-                client.client()::untagResource);
-        }
-        if (!CollectionUtils.isNullOrEmpty(tagsToAdd)) {
-            proxy.injectCredentialsAndInvokeV2(
-                Translator.translateToTagResourceRequest(model.getArn(), tagsToAdd),
-                client.client()::tagResource);
-        }
+        return progress;
     }
-
-    private boolean hasChangeOnCoreModel(final ResourceModel r1, final ResourceModel r2){
-        return !getResourceWithoutTags(r1).equals(getResourceWithoutTags(r2));
-    }
-
-    private ResourceModel getResourceWithoutTags(final ResourceModel resourceModel) {
-        return ResourceModel.builder()
-            .status(resourceModel.getStatus())
-            .userName(resourceModel.getUserName())
-            .accessString(resourceModel.getAccessString())
-            .authenticationMode(resourceModel.getAuthenticationMode())
-            .arn(resourceModel.getArn())
-            .build();
-    }
-
-    private void setModelArn(AmazonWebServicesClientProxy proxy, ProxyClient<MemoryDbClient> client,
-        final ResourceModel model) {
-        if (StringUtils.isNullOrEmpty(model.getArn())) {
-            DescribeUsersResponse response = proxy.injectCredentialsAndInvokeV2(
-                Translator.translateToReadRequest(model),
-                client.client()::describeUsers);
-            if (response.users().size() > 0) {
-                model.setArn(response.users().get(0).arn());
-            }
-        }
-    }
-
 }

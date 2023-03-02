@@ -1,13 +1,16 @@
 package software.amazon.memorydb.acl;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.apache.commons.collections.CollectionUtils;
 import software.amazon.awssdk.services.memorydb.model.ACL;
 import software.amazon.awssdk.services.memorydb.model.CreateAclRequest;
 import software.amazon.awssdk.services.memorydb.model.DeleteAclRequest;
@@ -18,21 +21,34 @@ import software.amazon.awssdk.services.memorydb.model.Tag;
 import software.amazon.awssdk.services.memorydb.model.TagResourceRequest;
 import software.amazon.awssdk.services.memorydb.model.UntagResourceRequest;
 import software.amazon.awssdk.services.memorydb.model.UpdateAclRequest;
+import software.amazon.cloudformation.proxy.ResourceHandlerRequest;
 
 public class Translator {
 
   public static final int MAX_RESULTS = 50;
 
+    static boolean hasChangeOnCoreModelWithoutTags(final ResourceModel r1, final ResourceModel r2){
+        return isListModified(r1.getUserNames(), r2.getUserNames());
+    }
+
+    static boolean isListModified(final List<String> list1, final List<String> list2) {
+        boolean modified = !(CollectionUtils.isEmpty(list1) && CollectionUtils.isEmpty(list2));
+        if (CollectionUtils.isNotEmpty(list1) && CollectionUtils.isNotEmpty(list2)) {
+            modified = !(new HashSet<>(list1).equals(new HashSet<>(list2)));
+        }
+        return modified;
+    }
   /**
    * Request to create a resource
    * @param model resource model
    * @return awsRequest the aws service request to create a resource
    */
-  static CreateAclRequest translateToCreateRequest(final ResourceModel model) {
+  static CreateAclRequest translateToCreateRequest(final ResourceModel model,
+      final ResourceHandlerRequest<ResourceModel> request) {
     return CreateAclRequest.builder()
         .aclName(model.getACLName())
         .userNames(model.getUserNames())
-        .tags(translateTagsToSdk(model.getTags()))
+        .tags(TagHelper.generateTagsForCreate(model, request))
         .build();
   }
 

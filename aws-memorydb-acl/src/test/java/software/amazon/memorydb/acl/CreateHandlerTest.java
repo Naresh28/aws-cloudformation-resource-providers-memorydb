@@ -85,10 +85,13 @@ public class CreateHandlerTest extends AbstractTestBase {
         final CreateHandler handler = new CreateHandler();
 
         final ResourceModel model = buildDefaultResourceModel();
+        final ResourceModel expectedResourceModel = buildDefaultResourceModel();
+        expectedResourceModel.setTags(TAG_SET);
 
         final ResourceHandlerRequest<ResourceModel> request = ResourceHandlerRequest.<ResourceModel>builder()
             .desiredResourceState(model)
             .build();
+        request.setDesiredResourceTags(translateTagsToMap(TAG_SET));
 
         final ProgressEvent<ResourceModel, CallbackContext> response = handler
             .handleRequest(proxy, request, new CallbackContext(), proxyClient, logger);

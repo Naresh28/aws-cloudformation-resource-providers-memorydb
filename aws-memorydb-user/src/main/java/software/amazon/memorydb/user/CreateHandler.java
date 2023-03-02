@@ -35,7 +35,7 @@ public class CreateHandler extends BaseHandlerStd {
             .then(progress ->
                 proxy.initiate("AWS-MemoryDB-User::Create", proxyClient, progress.getResourceModel(),
                     progress.getCallbackContext())
-                    .translateToServiceRequest(Translator::translateToCreateRequest)
+                    .translateToServiceRequest((model) -> Translator.translateToCreateRequest(resourceModel, request))
                     .makeServiceCall((awsRequest, client) -> handleExceptions(() ->
                         client.injectCredentialsAndInvokeV2(awsRequest, client.client()::createUser)))
                     .progress()

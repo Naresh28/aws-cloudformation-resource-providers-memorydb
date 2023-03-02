@@ -1,0 +1,19 @@
+Resources:
+  MemoryDBUser:
+    Type: AWS::MemoryDB::User
+    Properties:
+      UserName: "user-for-ct-9876543210"
+      AccessString: "off ~keys* -@all +get"
+      AuthenticationMode:
+        "Type": "password"
+        "Passwords":
+          - "sasadasdsadadas2313123asdasd"
+  MemoryDBUser2:
+    Type: AWS::MemoryDB::User
+    Properties:
+      UserName: "add-user-ct-9876543210"
+      AccessString: "off ~keys* -@all +get"
+      AuthenticationMode:
+        "Type": "password"
+        "Passwords":
+          - "sasadasdsadadas2313123asdasd"

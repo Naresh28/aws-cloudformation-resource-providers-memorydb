@@ -1,0 +1,26 @@
+{
+  "CreateInputs": {
+    "ACLName": "usergroup-ct-1234567890",
+    "UserNames": [
+      "user-for-ct-9876543210"
+    ],
+    "Tags": [
+      {
+        "Key": "service",
+        "Value": "memorydb"
+      }
+    ]
+  },
+  "PatchInputs": [
+    {
+      "op": "replace",
+      "path": "/Tags/0/Value",
+      "value": "new-value"
+    },
+    {
+      "op": "add",
+      "path": "/UserNames/1",
+      "value": "add-user-ct-9876543210"
+    }
+  ]
+}

@@ -4,10 +4,12 @@ import com.google.common.collect.ImmutableList;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import org.mockito.ArgumentCaptor;
+import org.mockito.internal.util.collections.Sets;
 import software.amazon.awssdk.services.memorydb.MemoryDbClient;
 import software.amazon.awssdk.services.memorydb.model.AclNotFoundException;
 import software.amazon.awssdk.services.memorydb.model.DescribeAcLsRequest;
@@ -116,6 +118,63 @@ public class UpdateHandlerTest extends AbstractTestBase {
             .desiredResourceState(modelDesired)
             .previousResourceTags(Collections.singletonMap("test", "test"))
             .desiredResourceTags(Translator.translateTags(TAG_SET))
+            .build();
+
+        final ProgressEvent<ResourceModel, CallbackContext> response = handler
+            .handleRequest(proxy, request, new CallbackContext(), proxyClient, logger);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(OperationStatus.SUCCESS);
+        assertThat(response.getCallbackDelaySeconds()).isEqualTo(0);
+        assertThat(response.getResourceModel().getStatus()).isEqualTo(ACTIVE);
+        assertThat(response.getResourceModel()).isEqualTo(request.getDesiredResourceState());
+        assertThat(response.getResourceModels()).isNull();
+        assertThat(response.getMessage()).isNull();
+        assertThat(response.getErrorCode()).isNull();
+    }
+
+    @Test
+    public void handleRequest_OnlyTagUpdate() {
+        Set<Tag> newTags = Sets.newSet(
+            Tag.builder().key("key").value("newValue").build(),
+            Tag.builder().key("keyNew").value("value").build());
+        Set<Tag> oldTags = Sets.newSet(
+            Tag.builder().key("key").value("oldValue").build(),
+            Tag.builder().key("keyOld").value("value").build());
+
+        final ListTagsResponse listTagsOldResponse =
+            ListTagsResponse.builder().tagList(translateTagsToSdk(oldTags)).build();
+        final ListTagsResponse listTagsNewResponse =
+            ListTagsResponse.builder().tagList(translateTagsToSdk(newTags)).build();
+        final DescribeAcLsResponse describeUpdatedAclResponse =
+            DescribeAcLsResponse.builder().acLs(buildDefaultAcl(ACTIVE, false, USER_NAMES)).build();
+
+        when(sdkClient.tagResource(any(TagResourceRequest.class))).thenReturn(TagResourceResponse.builder().build());
+        when(sdkClient.untagResource(any(UntagResourceRequest.class))).thenReturn(UntagResourceResponse.builder().build());
+        when(sdkClient.describeACLs(any(DescribeAcLsRequest.class))).thenReturn(describeUpdatedAclResponse);
+        AtomicInteger attempt = new AtomicInteger(2);
+        when(sdkClient.listTags(any(ListTagsRequest.class))).then((m) -> {
+            switch (attempt.getAndDecrement()) {
+                case 2:
+                    return listTagsOldResponse;
+                default:
+                    return listTagsNewResponse;
+            }
+        });
+
+        final UpdateHandler handler = new UpdateHandler();
+
+        final ResourceModel previousResourceModel = buildDefaultResourceModel();
+        previousResourceModel.setTags(oldTags);
+        final ResourceModel desiredResourceModel = buildDefaultResourceModel();
+        desiredResourceModel.setTags(newTags);
+
+
+        final ResourceHandlerRequest<ResourceModel> request = ResourceHandlerRequest.<ResourceModel>builder()
+            .previousResourceState(previousResourceModel)
+            .desiredResourceState(desiredResourceModel)
+            .previousResourceTags(translateTagsToMap(oldTags))
+            .desiredResourceTags(translateTagsToMap(newTags))
             .build();
 
         final ProgressEvent<ResourceModel, CallbackContext> response = handler

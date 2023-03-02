@@ -3,7 +3,9 @@ package software.amazon.memorydb.user;
 import com.google.common.collect.ImmutableList;
 import java.time.Duration;
 import java.util.Collections;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.mockito.internal.util.collections.Sets;
 import software.amazon.awssdk.services.memorydb.MemoryDbClient;
 import software.amazon.awssdk.services.memorydb.model.DescribeUsersRequest;
 import software.amazon.awssdk.services.memorydb.model.DescribeUsersResponse;
@@ -75,8 +77,6 @@ public class UpdateHandlerTest extends AbstractTestBase {
             ).build();
 
         when(sdkClient.listTags(any(ListTagsRequest.class))).thenReturn(listTagsResponse);
-        when(sdkClient.tagResource(any(TagResourceRequest.class))).thenReturn(TagResourceResponse.builder().build());
-        when(sdkClient.untagResource(any(UntagResourceRequest.class))).thenReturn(UntagResourceResponse.builder().build());
         when(sdkClient.updateUser(any(UpdateUserRequest.class))).thenReturn(updateUserResponse);
 
         final DescribeUsersResponse describeInProgressUserResponse =
@@ -104,7 +104,112 @@ public class UpdateHandlerTest extends AbstractTestBase {
             .desiredResourceState(modelDesired)
             .build();
         request.setDesiredResourceTags(Translator.translateTags(TAG_SET));
-        request.setPreviousResourceTags(Collections.singletonMap("test", "test"));
+        request.setPreviousResourceTags(Translator.translateTags(TAG_SET));
+
+        final ProgressEvent<ResourceModel, CallbackContext> response = handler.handleRequest(proxy, request,
+            new CallbackContext(), proxyClient, logger);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(OperationStatus.SUCCESS);
+        assertThat(response.getCallbackDelaySeconds()).isEqualTo(0);
+        assertThat(response.getResourceModels()).isNull();
+        assertThat(response.getResourceModel().getStatus()).isEqualTo(ACTIVE);
+        assertThat(response.getResourceModel().getUserName()).isEqualTo(USER_NAME);
+        assertThat(response.getMessage()).isNull();
+        assertThat(response.getErrorCode()).isNull();
+    }
+
+    @Test
+    public void handleRequest_PasswordUpdate() {
+        final UpdateUserResponse updateUserResponse = UpdateUserResponse.builder().build();
+        final ListTagsResponse listTagsResponse =
+            ListTagsResponse.builder().tagList(
+                ImmutableList.of(
+                    software.amazon.awssdk.services.memorydb.model.Tag.builder().key("test").value("test").build())
+            ).build();
+
+        when(sdkClient.listTags(any(ListTagsRequest.class))).thenReturn(listTagsResponse);
+        when(sdkClient.updateUser(any(UpdateUserRequest.class))).thenReturn(updateUserResponse);
+
+        final DescribeUsersResponse describeInProgressUserResponse =
+            DescribeUsersResponse.builder().users(buildDefaultUser(MODIFYING)).build();
+        final DescribeUsersResponse describeModifiedUserResponse =
+            DescribeUsersResponse.builder().users(buildDefaultUser(ACTIVE)).build();
+        AtomicInteger attempt = new AtomicInteger(2);
+        when(sdkClient.describeUsers(any(DescribeUsersRequest.class))).then((m) -> {
+            switch (attempt.getAndDecrement()) {
+                case 2:
+                    return describeInProgressUserResponse;
+                default:
+                    return describeModifiedUserResponse;
+            }
+        });
+
+        final UpdateHandler handler = new UpdateHandler();
+
+        final ResourceModel modelPrevious = buildDefaultResourceModel();
+        final ResourceModel modelDesired = buildDefaultResourceModel();
+        modelDesired.setAuthenticationMode(AuthenticationMode.builder().type(AUTHMODE)
+            .passwords(Collections.singletonList("updated-password")).build());
+
+        final ResourceHandlerRequest<ResourceModel> request = ResourceHandlerRequest.<ResourceModel>builder()
+            .previousResourceState(modelPrevious)
+            .desiredResourceState(modelDesired)
+            .build();
+        request.setDesiredResourceTags(Translator.translateTags(TAG_SET));
+        request.setPreviousResourceTags(Translator.translateTags(TAG_SET));
+
+        final ProgressEvent<ResourceModel, CallbackContext> response = handler.handleRequest(proxy, request,
+            new CallbackContext(), proxyClient, logger);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(OperationStatus.SUCCESS);
+        assertThat(response.getCallbackDelaySeconds()).isEqualTo(0);
+        assertThat(response.getResourceModels()).isNull();
+        assertThat(response.getResourceModel().getStatus()).isEqualTo(ACTIVE);
+        assertThat(response.getResourceModel().getUserName()).isEqualTo(USER_NAME);
+        assertThat(response.getMessage()).isNull();
+        assertThat(response.getErrorCode()).isNull();
+    }
+
+    @Test
+    public void handleRequest_AuthModeUpdate() {
+        final UpdateUserResponse updateUserResponse = UpdateUserResponse.builder().build();
+        final ListTagsResponse listTagsResponse =
+            ListTagsResponse.builder().tagList(
+                ImmutableList.of(
+                    software.amazon.awssdk.services.memorydb.model.Tag.builder().key("test").value("test").build())
+            ).build();
+
+        when(sdkClient.listTags(any(ListTagsRequest.class))).thenReturn(listTagsResponse);
+        when(sdkClient.updateUser(any(UpdateUserRequest.class))).thenReturn(updateUserResponse);
+
+        final DescribeUsersResponse describeInProgressUserResponse =
+            DescribeUsersResponse.builder().users(buildDefaultUser(MODIFYING)).build();
+        final DescribeUsersResponse describeModifiedUserResponse =
+            DescribeUsersResponse.builder().users(buildDefaultUser(ACTIVE)).build();
+        AtomicInteger attempt = new AtomicInteger(2);
+        when(sdkClient.describeUsers(any(DescribeUsersRequest.class))).then((m) -> {
+            switch (attempt.getAndDecrement()) {
+                case 2:
+                    return describeInProgressUserResponse;
+                default:
+                    return describeModifiedUserResponse;
+            }
+        });
+
+        final UpdateHandler handler = new UpdateHandler();
+
+        final ResourceModel modelPrevious = buildDefaultResourceModel();
+        final ResourceModel modelDesired = buildDefaultResourceModel();
+        modelDesired.setAuthenticationMode(AuthenticationMode.builder().type("iam").build());
+
+        final ResourceHandlerRequest<ResourceModel> request = ResourceHandlerRequest.<ResourceModel>builder()
+            .previousResourceState(modelPrevious)
+            .desiredResourceState(modelDesired)
+            .build();
+        request.setDesiredResourceTags(Translator.translateTags(TAG_SET));
+        request.setPreviousResourceTags(Translator.translateTags(TAG_SET));
 
         final ProgressEvent<ResourceModel, CallbackContext> response = handler.handleRequest(proxy, request,
             new CallbackContext(), proxyClient, logger);
@@ -148,14 +253,18 @@ public class UpdateHandlerTest extends AbstractTestBase {
     }
 
     @Test
-    public void handleRequest_TagUpdate() {
+    public void handleRequest_updateTags() {
         final DescribeUsersResponse describeUserResponse =
             DescribeUsersResponse.builder().users(buildDefaultUser()).build();
         final ListTagsResponse listTagsResponse =
-            ListTagsResponse.builder().tagList(
-                ImmutableList.of(
-                    software.amazon.awssdk.services.memorydb.model.Tag.builder().key("test").value("test").build())
-            ).build();
+            ListTagsResponse.builder().tagList(translateTagsToSdk(TAG_SET)).build();
+
+        Set<Tag> newTags = Sets.newSet(
+            Tag.builder().key("key").value("newValue").build(),
+            Tag.builder().key("keyNew").value("value").build());
+        Set<Tag> oldTags = Sets.newSet(
+            Tag.builder().key("key").value("oldValue").build(),
+            Tag.builder().key("keyOld").value("value").build());
 
         when(sdkClient.listTags(any(ListTagsRequest.class))).thenReturn(listTagsResponse);
         when(sdkClient.tagResource(any(TagResourceRequest.class))).thenReturn(TagResourceResponse.builder().build());
@@ -164,14 +273,18 @@ public class UpdateHandlerTest extends AbstractTestBase {
 
         final UpdateHandler handler = new UpdateHandler();
 
-        final ResourceModel model = buildDefaultResourceModel();
+        final ResourceModel previousResourceModel = buildDefaultResourceModel();
+        final ResourceModel desiredResourceModel = buildDefaultResourceModel();
+        previousResourceModel.setTags(oldTags);
+        desiredResourceModel.setTags(newTags);
 
         final ResourceHandlerRequest<ResourceModel> request = ResourceHandlerRequest.<ResourceModel>builder()
-            .previousResourceState(model)
-            .desiredResourceState(model)
+            .previousResourceState(previousResourceModel)
+            .desiredResourceState(desiredResourceModel)
             .build();
-        request.setDesiredResourceTags(Translator.translateTags(TAG_SET));
-        request.setPreviousResourceTags(Collections.singletonMap("test", "test"));
+        request.setPreviousResourceTags(translateTagsToMap(oldTags));
+        request.setDesiredResourceTags(translateTagsToMap(newTags));
+        request.getDesiredResourceState().setTags(newTags);
 
         final ProgressEvent<ResourceModel, CallbackContext> response = handler.handleRequest(proxy, request,
             new CallbackContext(), proxyClient, logger);
@@ -197,7 +310,6 @@ public class UpdateHandlerTest extends AbstractTestBase {
             ).build();
 
         when(sdkClient.listTags(any(ListTagsRequest.class))).thenReturn(listTagsResponse);
-        when(sdkClient.tagResource(any(TagResourceRequest.class))).thenReturn(TagResourceResponse.builder().build());
         when(sdkClient.untagResource(any(UntagResourceRequest.class))).thenReturn(UntagResourceResponse.builder().build());
         when(sdkClient.describeUsers(any(DescribeUsersRequest.class))).thenReturn(describeUserResponse);
 

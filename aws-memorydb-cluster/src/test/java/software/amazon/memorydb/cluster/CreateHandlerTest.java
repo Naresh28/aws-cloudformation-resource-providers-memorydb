@@ -71,17 +71,19 @@ public class CreateHandlerTest extends AbstractTestBase {
         final Cluster cluster = getTestCluster();
         final ResourceModel desiredTestResourceModel = getDesiredTestResourceModel();
         final ResourceModel expectedResourceModel = getResourceModel(cluster);
+        expectedResourceModel.setTags(TAG_SET);
 
         final CreateClusterResponse createClusterResponse = getCreateClusterReponse();
 
         final DescribeClustersResponse describeClustersResponse = DescribeClustersResponse.builder().clusters(cluster).nextToken(null).build();
-        final ListTagsResponse listTagsResponse = ListTagsResponse.builder().build();
+        final ListTagsResponse listTagsResponse = ListTagsResponse.builder().tagList(translateTagsToSdk(TAG_SET)).build();
         when(proxyClient.client().listTags(any(ListTagsRequest.class))).thenReturn(listTagsResponse);
         when(proxyClient.client().createCluster(any(CreateClusterRequest.class))).thenReturn(createClusterResponse);
         when(proxyClient.client().describeClusters(any(DescribeClustersRequest.class))).thenReturn(describeClustersResponse);
 
         final ResourceHandlerRequest<ResourceModel> request =
                 ResourceHandlerRequest.<ResourceModel>builder().desiredResourceState(desiredTestResourceModel).build();
+        request.setDesiredResourceTags(translateTagsToMap(TAG_SET));
 
         final ProgressEvent<ResourceModel, CallbackContext> response = handler.handleRequest(proxy, request, new CallbackContext(), proxyClient, logger);
 

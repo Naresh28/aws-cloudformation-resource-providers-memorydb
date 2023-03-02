@@ -2,12 +2,14 @@ package software.amazon.memorydb.user;
 
 import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.apache.commons.collections.CollectionUtils;
 import software.amazon.awssdk.services.memorydb.model.CreateUserRequest;
 import software.amazon.awssdk.services.memorydb.model.DeleteUserRequest;
 import software.amazon.awssdk.services.memorydb.model.DescribeUsersRequest;
@@ -18,6 +20,7 @@ import software.amazon.awssdk.services.memorydb.model.UntagResourceRequest;
 import software.amazon.awssdk.services.memorydb.model.UpdateUserRequest;
 import software.amazon.awssdk.services.memorydb.model.User;
 import software.amazon.awssdk.services.memorydb.model.Tag;
+import software.amazon.cloudformation.proxy.ResourceHandlerRequest;
 
 /**
  * This class is a centralized placeholder for
@@ -30,12 +33,51 @@ public class Translator {
 
   public static final int MAX_RECORDS = 50;
 
+    /**
+     * Returns true if desiredValue is not null and it is not equal to the currentValue.
+     *
+     * Property may be skipped from the template if no modification is needed for it, hence a property is considered as
+     * modified only if value is provided and provided value is different from the current value.
+     *
+     * @param desiredValue requested new value
+     * @param currentValue current value
+     * @param <T> type of the property value
+     * @return true if modification for the property is requested, otherwise false
+     */
+    static <T> boolean isModified(final T desiredValue, final T currentValue) {
+        return (desiredValue != null && !desiredValue.equals(currentValue));
+    }
+
+    static boolean hasChangeOnCoreModelWithoutTags(final ResourceModel r1, final ResourceModel r2){
+        return (Translator.isModified(r1.getAccessString(), r2.getAccessString())
+            || isAuthenticationModeModified(r1.getAuthenticationMode(), r2.getAuthenticationMode()));
+    }
+
+    static boolean isAuthenticationModeModified(final AuthenticationMode a1,
+        final AuthenticationMode a2) {
+        boolean modified = !(a1 == null && a2 == null);
+        if (a1 != null && a2 != null) {
+            modified = Translator.isModified(a1.getType(), a2.getType())
+                || isPasswordListModified(a1.getPasswords(), a2.getPasswords());
+        }
+        return modified;
+    }
+
+    static boolean isPasswordListModified(final List<String> list1, final List<String> list2) {
+        boolean modified = !(CollectionUtils.isEmpty(list1) && CollectionUtils.isEmpty(list2));
+        if (CollectionUtils.isNotEmpty(list1) && CollectionUtils.isNotEmpty(list2)) {
+            modified = !(new HashSet<>(list1).equals(new HashSet<>(list2)));
+        }
+        return modified;
+    }
+
   /**
    * Request to create a resource
    * @param model resource model
    * @return awsRequest the aws service request to create a resource
    */
-  static CreateUserRequest translateToCreateRequest(final ResourceModel model) {
+  static CreateUserRequest translateToCreateRequest(final ResourceModel model,
+      final ResourceHandlerRequest<ResourceModel> request) {
     return CreateUserRequest.builder()
         .userName(model.getUserName())
         .authenticationMode(
@@ -44,7 +86,7 @@ public class Translator {
                 .passwords(model.getAuthenticationMode().getPasswords())
               .build())
         .accessString(model.getAccessString())
-        .tags(translateTagsToSdk(model.getTags()))
+        .tags(TagHelper.generateTagsForCreate(model, request))
         .build();
   }
 
@@ -171,22 +213,18 @@ public class Translator {
         .collect(Collectors.toMap(software.amazon.memorydb.user.Tag::getKey, software.amazon.memorydb.user.Tag::getValue)) :
         null;
   }
-
-  static UntagResourceRequest translateToUntagResourceRequest(String arn,
-      Collection<software.amazon.memorydb.user.Tag> tagsToRemove) {
-    return UntagResourceRequest.builder()
-        .resourceArn(arn)
-        .tagKeys(tagsToRemove != null ? tagsToRemove.stream()
-            .map(tag -> tag.getKey())
-            .collect(Collectors.toList()) : null)
-        .build();
+  static TagResourceRequest translateToTagResourceRequest(final ResourceModel model, final List<Tag> tagsToAdd) {
+    return TagResourceRequest.builder()
+      .resourceArn(model.getArn())
+      .tags(tagsToAdd)
+      .build();
   }
 
-  static TagResourceRequest translateToTagResourceRequest(String arn, Collection<software.amazon.memorydb.user.Tag> tagsToAdd) {
-    return  TagResourceRequest.builder()
-        .resourceArn(arn)
-        .tags(translateTagsToSdk(tagsToAdd))
-        .build();
+  static UntagResourceRequest translateToUntagResourceRequest(final ResourceModel model, final Set<String> tagsToRemove) {
+    return UntagResourceRequest.builder()
+      .resourceArn(model.getArn())
+      .tagKeys(tagsToRemove)
+      .build();
   }
 
 }

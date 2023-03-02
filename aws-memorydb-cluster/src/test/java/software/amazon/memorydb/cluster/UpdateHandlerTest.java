@@ -102,9 +102,10 @@ public class UpdateHandlerTest extends AbstractTestBase {
         assertThat(response.getResourceModels()).isNull();
         assertThat(response.getMessage()).isNull();
         assertThat(response.getErrorCode()).isNull();
-        verify(proxyClient.client()).describeClusters(any(DescribeClustersRequest.class));
+        verify(proxyClient.client(), times(2)).describeClusters(any(DescribeClustersRequest.class));
         verify(proxyClient.client(), times(1)).listTags(any(ListTagsRequest.class));
-        verify(sdkClient, atLeastOnce()).serviceName();
+        verify(proxyClient.client()).tagResource(any(TagResourceRequest.class));
+        verify(sdkClient, times(3)).serviceName();
     }
 
 
@@ -161,13 +162,15 @@ public class UpdateHandlerTest extends AbstractTestBase {
     }
 
     @Test
-    public void handleRequest_UpdateClusterUpdateTags(){
+    public void handleRequest_UpdateClusterAddTags(){
         final ResourceModel previousTestResourceModel = getDesiredTestResourceModel();
         final ResourceModel desiredTestResourceModel = getDesiredTestResourceModel();
+        desiredTestResourceModel.setStatus("available");
         desiredTestResourceModel.setARN(CLUSTER_ARN);
         final ResourceHandlerRequest<ResourceModel> request =
                 buildRequest(desiredTestResourceModel, previousTestResourceModel);
-        Set<Tag> newTags = Sets.newSet(Tag.builder().key("key").value("newValue").build(),
+        Set<Tag> newTags = Sets.newSet(
+                Tag.builder().key("key").value("newValue").build(),
                 Tag.builder().key("keyNew").value("value").build());
         Set<Tag> oldTags = Sets.newSet(
                 Tag.builder().key("key").value("oldValue").build(),
@@ -176,15 +179,18 @@ public class UpdateHandlerTest extends AbstractTestBase {
         request.setPreviousResourceTags(translateTagsToMap(oldTags));
         request.setDesiredResourceTags(translateTagsToMap(newTags));
         request.getDesiredResourceState().setTags(newTags);
-        final ListTagsResponse listTagsResponse = ListTagsResponse.builder()
-                .tagList(translateTagsToSdk(oldTags)).build();
-        when(proxyClient.client().listTags(any(ListTagsRequest.class))).thenReturn(listTagsResponse);
-        final UntagResourceResponse untagResourceResponse = UntagResourceResponse.builder().build();
-        when(sdkClient.untagResource(any(UntagResourceRequest.class))).thenReturn(untagResourceResponse);
         final TagResourceResponse tagResourceResponse = TagResourceResponse.builder().tagList(translateTagsToSdk(request.getDesiredResourceState().getTags())).build();
         when(sdkClient.tagResource(any(TagResourceRequest.class))).thenReturn(tagResourceResponse);
+        final Cluster desiredCluster = getTestCluster(desiredTestResourceModel);
 
-        final ProgressEvent<ResourceModel, CallbackContext> response = handler.tagResource(proxy, proxyClient, ProgressEvent.progress(desiredTestResourceModel, new CallbackContext()), request, logger);
+        final DescribeClustersResponse finalResponse =
+            DescribeClustersResponse
+                .builder()
+                .clusters(desiredCluster).build();
+        when(proxyClient.client().describeClusters(any(DescribeClustersRequest.class)))
+            .thenReturn(finalResponse);
+
+        final ProgressEvent<ResourceModel, CallbackContext> response = handler.addTags(proxy, ProgressEvent.progress(desiredTestResourceModel, new CallbackContext()), request,proxyClient);
 
         assertThat(response).isNotNull();
         assertThat(response.getStatus()).isEqualTo(OperationStatus.IN_PROGRESS);
@@ -194,9 +200,51 @@ public class UpdateHandlerTest extends AbstractTestBase {
         assertThat(response.getNextToken()).isNull();
         assertThat(response.getMessage()).isNull();
         assertThat(response.getErrorCode()).isNull();
-        verify(proxyClient.client()).listTags(any(ListTagsRequest.class));
-        verify(proxyClient.client()).untagResource(any(UntagResourceRequest.class));
         verify(proxyClient.client()).tagResource(any(TagResourceRequest.class));
+
+        verify(sdkClient, atLeastOnce()).serviceName();
+    }
+
+    @Test
+    public void handleRequest_UpdateClusterRemoveTags(){
+        final ResourceModel previousTestResourceModel = getDesiredTestResourceModel();
+        final ResourceModel desiredTestResourceModel = getDesiredTestResourceModel();
+        desiredTestResourceModel.setStatus("available");
+        desiredTestResourceModel.setARN(CLUSTER_ARN);
+        final ResourceHandlerRequest<ResourceModel> request =
+            buildRequest(desiredTestResourceModel, previousTestResourceModel);
+        Set<Tag> newTags = Sets.newSet(
+            Tag.builder().key("key").value("newValue").build(),
+            Tag.builder().key("keyNew").value("value").build());
+        Set<Tag> oldTags = Sets.newSet(
+            Tag.builder().key("key").value("oldValue").build(),
+            Tag.builder().key("keyOld").value("value").build());
+
+        request.setPreviousResourceTags(translateTagsToMap(oldTags));
+        request.setDesiredResourceTags(translateTagsToMap(newTags));
+        request.getDesiredResourceState().setTags(newTags);
+        final UntagResourceResponse untagResourceResponse = UntagResourceResponse.builder().build();
+        when(sdkClient.untagResource(any(UntagResourceRequest.class))).thenReturn(untagResourceResponse);
+        final Cluster desiredCluster = getTestCluster(desiredTestResourceModel);
+
+        final DescribeClustersResponse finalResponse =
+            DescribeClustersResponse
+                .builder()
+                .clusters(desiredCluster).build();
+        when(proxyClient.client().describeClusters(any(DescribeClustersRequest.class)))
+            .thenReturn(finalResponse);
+
+        final ProgressEvent<ResourceModel, CallbackContext> response = handler.removeTags(proxy, ProgressEvent.progress(desiredTestResourceModel, new CallbackContext()), request,proxyClient);
+
+        assertThat(response).isNotNull();
+        assertThat(response.getStatus()).isEqualTo(OperationStatus.IN_PROGRESS);
+        assertThat(response.getCallbackContext()).isNotNull();
+        assertThat(response.getCallbackDelaySeconds()).isEqualTo(0);
+        assertThat(response.getResourceModels()).isNull();
+        assertThat(response.getNextToken()).isNull();
+        assertThat(response.getMessage()).isNull();
+        assertThat(response.getErrorCode()).isNull();
+        verify(proxyClient.client()).untagResource(any(UntagResourceRequest.class));
 
         verify(sdkClient, atLeastOnce()).serviceName();
     }

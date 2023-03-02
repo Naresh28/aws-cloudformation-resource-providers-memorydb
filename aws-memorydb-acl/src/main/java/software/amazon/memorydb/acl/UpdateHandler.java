@@ -51,7 +51,7 @@ public class UpdateHandler extends BaseHandlerStd {
         ResourceHandlerRequest<ResourceModel> request,
         ProxyClient<MemoryDbClient> proxyClient
     ) {
-        if (hasChangeOnCoreModel(request.getDesiredResourceState(), request.getPreviousResourceState())) {
+        if (Translator.hasChangeOnCoreModelWithoutTags(request.getDesiredResourceState(), request.getPreviousResourceState())) {
             return proxy.initiate("AWS-MemoryDB-User::Update", proxyClient, progress.getResourceModel(),
                 progress.getCallbackContext())
                 .translateToServiceRequest(Translator::translateToUpdateRequest)
@@ -159,17 +159,6 @@ public class UpdateHandler extends BaseHandlerStd {
                 Translator.translateToTagResourceRequest(model.getArn(), tagsToAdd),
                 client.client()::tagResource);
         }
-    }
-
-    private boolean hasChangeOnCoreModel(final ResourceModel r1, final ResourceModel r2){
-        return !getRequestResource(r1).equals(getRequestResource(r2));
-    }
-
-    private ResourceModel getRequestResource(final ResourceModel resourceModel) {
-        return ResourceModel.builder()
-            .aCLName(resourceModel.getACLName())
-            .userNames(resourceModel.getUserNames())
-            .build();
     }
 
     private void setModelArn(AmazonWebServicesClientProxy proxy, ProxyClient<MemoryDbClient> client,

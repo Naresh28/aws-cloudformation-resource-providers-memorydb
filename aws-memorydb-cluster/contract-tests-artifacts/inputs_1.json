@@ -1,0 +1,47 @@
+{
+  "CreateInputs": {
+    "ClusterName": "cfncontractcluster",
+    "NodeType": "db.r6g.large",
+    "NumShards": 1,
+    "NumReplicasPerShard": 1,
+    "ACLName": "open-access",
+    "Tags": [
+      {
+        "Key": "service",
+        "Value": "memorydb"
+      }
+    ]
+  },
+  "PatchInputs": [
+    {
+      "op": "replace",
+      "path": "/Tags/0/Value",
+      "value": "test-value"
+    },
+    {
+      "op": "replace",
+      "path": "/Tags/0/Key",
+      "value": "test-key"
+    },
+    {
+      "op": "add",
+      "path": "/Description",
+      "value": "memdb cfn test cluster updated"
+    },
+    {
+      "op": "add",
+      "path": "/MaintenanceWindow",
+      "value": "sat:04:30-sat:05:30"
+    },
+    {
+      "op": "add",
+      "path": "/SnapshotWindow",
+      "value": "09:30-11:30"
+    },
+    {
+      "op": "add",
+      "path": "/SnapshotRetentionLimit",
+      "value": 2
+    }
+  ]
+}

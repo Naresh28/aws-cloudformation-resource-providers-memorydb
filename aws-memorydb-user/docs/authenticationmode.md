@@ -27,7 +27,7 @@ To declare this entity in your AWS CloudFormation template, use the following sy
 
 Type of authentication strategy for this user.
 
-_Required_: No
+_Required_: Yes
 
 _Type_: String
 
